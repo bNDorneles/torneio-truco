@@ -1,3 +1,5 @@
 {
-  "projects": {}
+  "projects": {
+    "default": "truco-2dc5a"
+  }
 }
