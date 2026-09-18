@@ -4,6 +4,8 @@ App web para gerenciar torneio de truco: jogadores, sorteio de duplas, grupos, p
 
 Publicação: **GitHub** (código) + **Vercel** (site) + **Firebase Firestore** (dados).
 
+Repositório: https://github.com/bNDorneles/torneio-truco
+
 ## Rodar local
 
 No PowerShell, se `npm` for bloqueado, use `npm.cmd`:
@@ -17,14 +19,8 @@ Sem Firebase, o app usa **localStorage** (só no mesmo navegador).
 
 ## Publicar (GitHub + Vercel)
 
-1. Crie um repositório no GitHub e envie o código:
-
-```bash
-git remote add origin https://github.com/SEU_USUARIO/torneio-truco.git
-git push -u origin main
-```
-
-2. Em [vercel.com](https://vercel.com) → **Add New** → **Project** → importe o repo.
+1. Código já está neste repositório.
+2. Em [vercel.com](https://vercel.com) → **Add New** → **Project** → importe `bNDorneles/torneio-truco`.
 3. Preset **Vite**, build `npm run build`, output `dist`.
 4. Em **Settings → Environment Variables**, cadastre as `VITE_FIREBASE_*` (veja abaixo).
 5. Faça um **Redeploy** depois de salvar as variáveis (o Vite só lê isso no build).
@@ -37,17 +33,9 @@ Passo a passo completo: [docs/SETUP_FIREBASE.md](docs/SETUP_FIREBASE.md).
 
 Resumo:
 
-1. Crie o projeto no [Firebase Console](https://console.firebase.google.com/)
-2. Ative **Firestore** (não precisa de Hosting — o site é o Vercel)
-3. Copie o `firebaseConfig` do app Web
-4. Local: copie `.env.example` para `.env` e preencha
-5. Publique as regras:
-
-```bash
-npx firebase login
-# edite .firebaserc com o project id
-npm run deploy:rules
-```
+1. Projeto Firebase `truco-2dc5a` + Firestore
+2. Local: `.env` com as chaves `VITE_FIREBASE_*`
+3. Regras do Firestore publicadas no console
 
 Variáveis (`VITE_` no `.env` local e no painel do Vercel):
 
