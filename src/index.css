@@ -458,3 +458,47 @@ th {
   margin-bottom: 0.35rem;
 }
 
+.draw-stage {
+  margin-top: 1.25rem;
+  min-height: 10rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #0c2f24, #071f17);
+  color: var(--gold);
+  border-radius: 14px;
+  padding: 1.25rem;
+}
+
+.draw-next,
+.draw-reveal {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+  font-size: 1.4rem;
+}
+
+.countdown-number {
+  font-family: var(--font-display);
+  font-size: clamp(4.5rem, 18vw, 8rem);
+  line-height: 0.9;
+  animation: count-pop 0.55s ease;
+}
+
+.pair-just-in {
+  animation: rise 0.45s ease both;
+  outline: 2px solid var(--gold);
+}
+
+@keyframes count-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.45);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+

@@ -9,8 +9,8 @@ export interface BracketBuildResult {
 }
 
 /**
- * Seeds: cross 1st vs 2nd from other groups when possible.
- * Byes go to top overall seeds.
+ * Chave cruzada 1º × 2º de outro grupo.
+ * Sem bye: só gera chave com potência de 2 e todos os lados preenchidos.
  */
 export function buildBracket(
   qualified: QualifiedPair[],
@@ -18,23 +18,26 @@ export function buildBracket(
 ): BracketBuildResult {
   const n = qualified.length
   if (n < 2) throw new Error('Precisa de pelo menos 2 classificados.')
+  if ((n & (n - 1)) !== 0) {
+    throw new Error('O mata-mata precisa de 2, 4, 8 ou 16 duplas — sem folga (bye).')
+  }
 
-  // Order: best firsts first, then rest already ordered by qualify
   const seeded = [...qualified]
   const size = n
   const roundsCount = Math.log2(size)
 
-  // Classic bracket seeding positions for power of 2
   const positions = seedPositions(size)
-  const slotPairs: (QualifiedPair | null)[] = Array(size).fill(null)
+  const slotPairs: QualifiedPair[] = Array(size)
   seeded.forEach((q, i) => {
     slotPairs[positions[i]] = q
   })
+  if (slotPairs.some((p) => !p)) {
+    throw new Error('Chave incompleta — todas as duplas precisam jogar.')
+  }
 
   const allMatches: Match[] = []
   const rounds: BracketSlot[][] = []
 
-  // Round 0 matches
   const round0: BracketSlot[] = []
   const round0Matches: Match[] = []
 
@@ -46,25 +49,15 @@ export function buildBracket(
       stage: 'knockout',
       round: 0,
       bracketSlot: i / 2,
-      pairAId: a?.pairId ?? null,
-      pairBId: b?.pairId ?? null,
+      pairAId: a.pairId,
+      pairBId: b.pairId,
       setsA: 0,
       setsB: 0,
       pointsA: 0,
       pointsB: 0,
       games: [],
       status: 'pending',
-      isBye: !a || !b,
-    }
-
-    if (a && !b) {
-      match.status = 'done'
-      match.winnerPairId = a.pairId
-      match.isBye = true
-    } else if (b && !a) {
-      match.status = 'done'
-      match.winnerPairId = b.pairId
-      match.isBye = true
+      isBye: false,
     }
 
     round0Matches.push(match)

@@ -13,7 +13,7 @@ export function phaseLabel(phase: Tournament['phase']): string {
     setup: 'Cadastro',
     pairs: 'Duplas',
     groups: 'Grupos',
-    knockout: 'Mata-mata',
+    knockout: '2 vidas',
     finished: 'Finalizado',
   }
   return map[phase]

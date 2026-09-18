@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { useTournament } from '../hooks/useTournament'
 import { getPairName, phaseLabel } from '../lib/labels'
-import { BracketView } from '../components/BracketView'
+import { LivesBoard } from '../components/LivesBoard'
 import { computeStandings } from '../domain/standings'
 
 export function TvPage() {
@@ -84,11 +84,11 @@ export function TvPage() {
         <div className="panel">
           <h2>
             {tournament.phase === 'knockout' || tournament.phase === 'finished'
-              ? 'Chave'
+              ? '2 vidas'
               : 'Tabelas'}
           </h2>
           {tournament.phase === 'knockout' || tournament.phase === 'finished' ? (
-            <BracketView tournament={tournament} />
+            <LivesBoard tournament={tournament} />
           ) : (
             <div className="stack">
               {tournament.groups.map((g) => {

@@ -9,16 +9,15 @@ import { drawPairs } from '../domain/drawPairs'
 import { formGroups, movePairBetweenGroups } from '../domain/formGroups'
 import { generateRoundRobin } from '../domain/roundRobin'
 import { computeStandings } from '../domain/standings'
-import { qualifyFromGroups } from '../domain/qualify'
-import { buildBracket, swapBracketPairs } from '../domain/buildBracket'
+import { startLivesPhase } from '../domain/lives'
 import { MatchEditor } from '../components/MatchEditor'
 import { StandingsTable } from '../components/StandingsTable'
-import { BracketView } from '../components/BracketView'
+import { LivesBoard } from '../components/LivesBoard'
 import {
   exportTournamentJson,
   importTournamentJson,
 } from '../lib/storage'
-import type { BestOf, Tournament } from '../types/tournament'
+import type { Pair, Tournament } from '../types/tournament'
 
 type Tab =
   | 'players'
@@ -36,7 +35,6 @@ export function AdminPage() {
   const [authed, setAuthed] = useState(false)
   const [tab, setTab] = useState<Tab>('players')
   const [playerName, setPlayerName] = useState('')
-  const [manualMode, setManualMode] = useState(false)
 
   useEffect(() => {
     if (tournament && isOrganizerSession(tournament.id)) {
@@ -131,8 +129,8 @@ export function AdminPage() {
             ['pairs', 'Sorteio'],
             ['groups', 'Grupos'],
             ['results', 'Resultados'],
-            ['knockout', 'Mata-mata'],
-            ['config', 'Config'],
+            ['knockout', '2 vidas'],
+            ['config', 'Backup'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -152,20 +150,14 @@ export function AdminPage() {
           playerName={playerName}
           setPlayerName={setPlayerName}
           onSave={update}
+          onGoToDraw={() => setTab('pairs')}
         />
       )}
       {tab === 'pairs' && <PairsTab tournament={tournament} onSave={update} />}
       {tab === 'groups' && <GroupsTab tournament={tournament} onSave={update} />}
       {tab === 'results' && <ResultsTab tournament={tournament} onSave={update} />}
-      {tab === 'knockout' && (
-        <KnockoutTab
-          tournament={tournament}
-          onSave={update}
-          manualMode={manualMode}
-          setManualMode={setManualMode}
-        />
-      )}
-      {tab === 'config' && <ConfigTab tournament={tournament} onSave={update} />}
+      {tab === 'knockout' && <KnockoutTab tournament={tournament} onSave={update} />}
+      {tab === 'config' && <ConfigTab tournament={tournament} />}
     </div>
   )
 }
@@ -175,12 +167,17 @@ function PlayersTab({
   playerName,
   setPlayerName,
   onSave,
+  onGoToDraw,
 }: {
   tournament: Tournament
   playerName: string
   setPlayerName: (v: string) => void
   onSave: (t: Tournament) => Promise<void>
+  onGoToDraw: () => void
 }) {
+  const even = tournament.players.length >= 2 && tournament.players.length % 2 === 0
+  const alreadyDrawn = tournament.pairs.length > 0
+
   async function addPlayer(e: FormEvent) {
     e.preventDefault()
     const name = playerName.trim()
@@ -200,7 +197,10 @@ function PlayersTab({
   return (
     <div className="panel fade-in">
       <h2>Jogadores ({tournament.players.length})</h2>
-      <p className="muted">Quantidade par. Mínimo 4 para um torneio com grupos.</p>
+      <p className="muted">
+        Cadastre cada pessoa pelo nome. As <strong>duplas não se cadastram</strong> — o sorteio
+        forma elas. Precisa de quantidade par (mínimo 4 para grupos).
+      </p>
       <form className="row" onSubmit={addPlayer}>
         <input
           style={{ flex: 1 }}
@@ -208,7 +208,7 @@ function PlayersTab({
           onChange={(e) => setPlayerName(e.target.value)}
           placeholder="Nome do jogador"
         />
-        <button type="submit">Adicionar</button>
+        <button type="submit">Adicionar jogador</button>
       </form>
       <ul className="list" style={{ marginTop: '1rem' }}>
         {tournament.players.map((p) => (
@@ -220,8 +220,21 @@ function PlayersTab({
           </li>
         ))}
       </ul>
+      <div className="row" style={{ marginTop: '1rem' }}>
+        <button type="button" onClick={onGoToDraw} disabled={!even || alreadyDrawn}>
+          {alreadyDrawn
+            ? 'Duplas já sorteadas'
+            : even
+              ? 'Ir para o sorteio das duplas'
+              : `Falta ${tournament.players.length % 2 === 1 ? '1 jogador' : 'jogadores'} para sortear`}
+        </button>
+      </div>
     </div>
   )
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
 function PairsTab({
@@ -232,25 +245,47 @@ function PairsTab({
   onSave: (t: Tournament) => Promise<void>
 }) {
   const [error, setError] = useState<string | null>(null)
-  const alreadyDrawn = tournament.pairs.length > 0
+  const [drawing, setDrawing] = useState(false)
+  const [countdown, setCountdown] = useState<number | null>(null)
+  const [pendingLabel, setPendingLabel] = useState<string | null>(null)
+  const alreadyDrawn = tournament.pairs.length > 0 && !drawing
 
   async function handleDraw() {
     try {
       setError(null)
-      if (alreadyDrawn) {
+      if (tournament.pairs.length > 0 || drawing) {
         setError('O sorteio já foi feito. Só é permitido uma vez.')
         return
       }
-      const pairs = drawPairs(tournament.players)
-      await onSave({
+      const allPairs = drawPairs(tournament.players)
+      setDrawing(true)
+      const base = {
         ...tournament,
-        pairs,
-        groups: [],
-        matches: [],
-        bracketRounds: [],
-        phase: 'pairs',
-      })
+        groups: [] as Tournament['groups'],
+        matches: [] as Tournament['matches'],
+        bracketRounds: [] as Tournament['bracketRounds'],
+        phase: 'pairs' as const,
+      }
+      await onSave({ ...base, pairs: [] })
+
+      const revealed: Pair[] = []
+      for (let i = 0; i < allPairs.length; i += 1) {
+        setPendingLabel(`Dupla ${i + 1}`)
+        for (const n of [3, 2, 1]) {
+          setCountdown(n)
+          await sleep(750)
+        }
+        setCountdown(null)
+        revealed.push(allPairs[i])
+        await onSave({ ...base, pairs: [...revealed] })
+        await sleep(1100)
+      }
+      setPendingLabel(null)
+      setDrawing(false)
     } catch (e) {
+      setDrawing(false)
+      setCountdown(null)
+      setPendingLabel(null)
       setError(e instanceof Error ? e.message : 'Erro no sorteio')
     }
   }
@@ -258,26 +293,53 @@ function PairsTab({
   return (
     <div className="panel fade-in">
       <h2>Sorteio de duplas</h2>
+      <p className="muted">
+        Primeiro cadastre os jogadores. Depois clique em sortear: cada dupla aparece com
+        contagem 3, 2, 1.
+      </p>
       <div className="row">
-        <button type="button" onClick={handleDraw} disabled={alreadyDrawn}>
-          {alreadyDrawn ? 'Sorteio concluído' : 'Sortear duplas'}
+        <button type="button" onClick={handleDraw} disabled={alreadyDrawn || drawing}>
+          {drawing
+            ? 'Sorteando…'
+            : alreadyDrawn
+              ? 'Sorteio concluído'
+              : 'Sortear duplas'}
         </button>
       </div>
-      {alreadyDrawn && (
+      {alreadyDrawn && !drawing && (
         <p className="muted">Duplas sorteadas uma vez — sem alterações manuais.</p>
       )}
       {error && <div className="alert">{error}</div>}
+
+      {drawing && (
+        <div className="draw-stage">
+          {countdown !== null ? (
+            <>
+              <p className="draw-next">{pendingLabel}</p>
+              <div key={countdown} className="countdown-number">
+                {countdown}
+              </div>
+            </>
+          ) : (
+            <p className="draw-reveal">Dupla revelada!</p>
+          )}
+        </div>
+      )}
+
       <ul className="list" style={{ marginTop: '1rem' }}>
         {tournament.pairs.map((pair, idx) => (
-          <li key={pair.id}>
+          <li
+            key={pair.id}
+            className={idx === tournament.pairs.length - 1 && drawing ? 'pair-just-in' : ''}
+          >
             <span>
               <strong>Dupla {idx + 1}:</strong> {pair.label}
             </span>
           </li>
         ))}
       </ul>
-      {tournament.pairs.length === 0 && (
-        <p className="empty">Cadastre jogadores e sorteie as duplas.</p>
+      {tournament.pairs.length === 0 && !drawing && (
+        <p className="empty">Cadastre os jogadores na aba Jogadores e depois sorteie aqui.</p>
       )}
     </div>
   )
@@ -422,129 +484,83 @@ function ResultsTab({
 function KnockoutTab({
   tournament,
   onSave,
-  manualMode,
-  setManualMode,
 }: {
   tournament: Tournament
   onSave: (t: Tournament) => Promise<void>
-  manualMode: boolean
-  setManualMode: (v: boolean) => void
 }) {
   const [error, setError] = useState<string | null>(null)
-  const koMatches = tournament.matches.filter(
-    (m) => m.stage === 'knockout' || m.stage === 'third',
-  )
+  const koMatches = tournament.matches.filter((m) => m.stage === 'knockout')
+  const pending = koMatches.filter((m) => m.status === 'pending')
+  const done = koMatches.filter((m) => m.status !== 'pending')
+  const started = koMatches.length > 0
 
-  async function generate() {
+  async function start() {
     try {
       setError(null)
-      const qualified = qualifyFromGroups(tournament.groups, tournament.matches)
-      const built = buildBracket(qualified, tournament.settings.thirdPlaceEnabled)
-      const groupMatches = tournament.matches.filter((m) => m.stage === 'group')
-      await onSave({
-        ...tournament,
-        matches: [...groupMatches, ...built.matches],
-        bracketRounds: built.rounds,
-        thirdPlaceMatchId: built.thirdPlaceMatch?.id ?? null,
-        phase: 'knockout',
-      })
+      if (tournament.pairs.length < 2) {
+        throw new Error('Precisa das duplas sorteadas.')
+      }
+      await onSave(startLivesPhase(tournament))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erro ao gerar chave')
+      setError(e instanceof Error ? e.message : 'Erro ao iniciar')
     }
-  }
-
-  async function manualSwap(matchId: string, side: 'A' | 'B', pairId: string) {
-    const ko = swapBracketPairs(koMatches, matchId, side, pairId || null)
-    await onSave({
-      ...tournament,
-      matches: [...tournament.matches.filter((m) => m.stage === 'group'), ...ko],
-    })
   }
 
   return (
     <div className="stack fade-in">
       <div className="panel">
-        <h2>Mata-mata</h2>
+        <h2>Fase de 2 vidas</h2>
+        <p className="muted">
+          Todas as duplas entram com 2 vidas. Quem perde o confronto perde 1 vida. Quem
+          perde as duas está fora. Os jogos vão sendo montados até sobrar uma campeã.
+        </p>
         <div className="row">
-          <button type="button" onClick={generate}>
-            Gerar chaveamento
-          </button>
-          <button
-            type="button"
-            className={manualMode ? '' : 'secondary'}
-            onClick={() => setManualMode(!manualMode)}
-          >
-            {manualMode ? 'Modo manual ativo' : 'Ativar modo manual'}
+          <button type="button" onClick={start} disabled={started}>
+            {started ? 'Fase já iniciada' : 'Iniciar 2 vidas'}
           </button>
         </div>
-        <p className="muted">
-          Padrão: 1º de um grupo × 2º de outro. Completa com melhores 2ºs. Byes para os
-          melhores.
-        </p>
         {error && <div className="alert">{error}</div>}
-        <BracketView tournament={tournament} />
+        {started && <LivesBoard tournament={tournament} />}
       </div>
 
-      {manualMode && (
+      {pending.length > 0 && (
         <div className="panel">
-          <h3>Ajuste manual (1ª rodada)</h3>
-          {koMatches
-            .filter((m) => m.stage === 'knockout' && m.round === 0)
-            .map((m) => (
-              <div className="row" key={m.id} style={{ marginBottom: '0.5rem' }}>
-                <select
-                  value={m.pairAId ?? ''}
-                  onChange={(e) => void manualSwap(m.id, 'A', e.target.value)}
-                >
-                  <option value="">—</option>
-                  {tournament.pairs.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-                <span>vs</span>
-                <select
-                  value={m.pairBId ?? ''}
-                  onChange={(e) => void manualSwap(m.id, 'B', e.target.value)}
-                >
-                  <option value="">—</option>
-                  {tournament.pairs.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          <h3>Jogos da vez</h3>
+          <div className="stack">
+            {pending.map((m) => (
+              <MatchEditor
+                key={m.id}
+                tournament={tournament}
+                match={m}
+                canEdit
+                onSave={onSave}
+              />
             ))}
+          </div>
         </div>
       )}
 
-      <div className="panel">
-        <h3>Placares do mata-mata</h3>
-        <div className="stack">
-          {koMatches.map((m) => (
-            <MatchEditor
-              key={m.id}
-              tournament={tournament}
-              match={m}
-              canEdit
-              onSave={onSave}
-            />
-          ))}
+      {done.length > 0 && (
+        <div className="panel">
+          <h3>Jogos encerrados</h3>
+          <div className="stack">
+            {done.map((m) => (
+              <MatchEditor
+                key={m.id}
+                tournament={tournament}
+                match={m}
+                canEdit
+                onSave={onSave}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
 
-function ConfigTab({
-  tournament,
-  onSave,
-}: {
-  tournament: Tournament
-  onSave: (t: Tournament) => Promise<void>
-}) {
+function ConfigTab({ tournament }: { tournament: Tournament }) {
   const [msg, setMsg] = useState<string | null>(null)
 
   function download() {
@@ -567,59 +583,13 @@ function ConfigTab({
 
   return (
     <div className="panel fade-in">
-      <h2>Configurações</h2>
+      <h2>Backup</h2>
+      <p className="muted">
+        O formato do torneio (melhor de {tournament.settings.bestOf}, meta{' '}
+        {tournament.settings.pointsTarget}) fica o que foi definido na criação. Depois dos
+        grupos, todas as duplas jogam a fase de 2 vidas.
+      </p>
       <div className="stack">
-        <label>
-          Formato (melhor de)
-          <select
-            value={tournament.settings.bestOf}
-            onChange={(e) =>
-              void onSave({
-                ...tournament,
-                settings: {
-                  ...tournament.settings,
-                  bestOf: Number(e.target.value) as BestOf,
-                },
-              })
-            }
-          >
-            <option value={1}>1</option>
-            <option value={3}>3</option>
-            <option value={5}>5</option>
-          </select>
-        </label>
-        <label>
-          Meta de pontos do round
-          <input
-            type="number"
-            value={tournament.settings.pointsTarget}
-            onChange={(e) =>
-              void onSave({
-                ...tournament,
-                settings: {
-                  ...tournament.settings,
-                  pointsTarget: Number(e.target.value) || 12,
-                },
-              })
-            }
-          />
-        </label>
-        <label style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-          <input
-            type="checkbox"
-            checked={tournament.settings.thirdPlaceEnabled}
-            onChange={(e) =>
-              void onSave({
-                ...tournament,
-                settings: {
-                  ...tournament.settings,
-                  thirdPlaceEnabled: e.target.checked,
-                },
-              })
-            }
-          />
-          Disputa de 3º lugar
-        </label>
         <div className="row">
           <button type="button" onClick={download}>
             Exportar JSON

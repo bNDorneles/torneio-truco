@@ -4,7 +4,7 @@ import { useTournament } from '../hooks/useTournament'
 import { phaseLabel, getPairName } from '../lib/labels'
 import { computeStandings } from '../domain/standings'
 import { StandingsTable } from '../components/StandingsTable'
-import { BracketView } from '../components/BracketView'
+import { LivesBoard } from '../components/LivesBoard'
 import { MatchEditor } from '../components/MatchEditor'
 
 type Tab = 'pairs' | 'groups' | 'results' | 'knockout'
@@ -58,7 +58,7 @@ export function PublicPage() {
             ['pairs', 'Duplas'],
             ['groups', 'Grupos'],
             ['results', 'Resultados'],
-            ['knockout', 'Mata-mata'],
+            ['knockout', '2 vidas'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -140,9 +140,30 @@ export function PublicPage() {
       )}
 
       {tab === 'knockout' && (
-        <div className="panel fade-in">
-          <h2>Chaveamento</h2>
-          <BracketView tournament={tournament} />
+        <div className="stack fade-in">
+          <div className="panel">
+            <h2>2 vidas</h2>
+            <LivesBoard tournament={tournament} />
+          </div>
+          <div className="panel">
+            <h3>Confrontos</h3>
+            <div className="stack">
+              {tournament.matches
+                .filter((m) => m.stage === 'knockout')
+                .map((m) => (
+                  <MatchEditor
+                    key={m.id}
+                    tournament={tournament}
+                    match={m}
+                    canEdit={false}
+                    onSave={async () => undefined}
+                  />
+                ))}
+              {!tournament.matches.some((m) => m.stage === 'knockout') && (
+                <p className="empty">Aguardando a fase de 2 vidas.</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

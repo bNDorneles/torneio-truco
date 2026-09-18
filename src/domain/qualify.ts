@@ -9,10 +9,11 @@ export interface QualifiedPair {
   tag: string
 }
 
-export function nextPowerOfTwo(n: number): number {
+/** Maior potência de 2 que cabe em n (mínimo 2). Sem pad / bye. */
+export function largestPowerOfTwo(n: number): number {
   let p = 1
-  while (p < n) p *= 2
-  return p
+  while (p * 2 <= n) p *= 2
+  return Math.max(p, 2)
 }
 
 export function qualifyFromGroups(
@@ -50,28 +51,11 @@ export function qualifyFromGroups(
   thirds.sort((a, b) => compareStandings(a.standing, b.standing, matches))
   firsts.sort((a, b) => compareStandings(a.standing, b.standing, matches))
 
-  const totalPairs = groups.reduce((sum, g) => sum + g.pairIds.length, 0)
-  let target = nextPowerOfTwo(Math.max(firsts.length, 2))
-  if (target > totalPairs) {
-    // shrink to largest power of 2 <= totalPairs
-    target = 1
-    while (target * 2 <= totalPairs) target *= 2
-  }
-  if (target < 2) target = 2
-
-  const qualified: QualifiedPair[] = [...firsts]
-  for (const s of seconds) {
-    if (qualified.length >= target) break
-    qualified.push(s)
-  }
-  for (const t of thirds) {
-    if (qualified.length >= target) break
-    qualified.push(t)
+  const pool: QualifiedPair[] = [...firsts, ...seconds, ...thirds]
+  if (pool.length < 2) {
+    throw new Error('Precisa de pelo menos 2 duplas classificadas.')
   }
 
-  // If we still have fewer than target but can't fill, use next lower power of 2
-  while (qualified.length < target && target > 2) {
-    target /= 2
-  }
-  return qualified.slice(0, target)
+  const target = largestPowerOfTwo(pool.length)
+  return pool.slice(0, target)
 }

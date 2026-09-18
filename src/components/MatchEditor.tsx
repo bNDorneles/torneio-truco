@@ -6,7 +6,7 @@ import {
   clearMatchResult,
   setsToWin,
 } from '../domain/matchScore'
-import { advanceBracketWinners } from '../domain/buildBracket'
+import { applyLivesAfterMatch } from '../domain/lives'
 import { getPairName } from '../lib/labels'
 
 interface Props {
@@ -50,27 +50,13 @@ export function MatchEditor({ tournament, match, canEdit, onSave }: Props) {
     setBusy(true)
     setError(null)
     try {
-      let matches = tournament.matches.map((m) =>
+      const matches = tournament.matches.map((m) =>
         m.id === updatedMatch.id ? updatedMatch : m,
       )
-
-      if (updatedMatch.stage === 'knockout' || updatedMatch.stage === 'third') {
-        const advanced = advanceBracketWinners(
-          matches.filter((m) => m.stage === 'knockout' || m.stage === 'third'),
-          tournament.bracketRounds,
-          tournament.thirdPlaceMatchId,
-        )
-        matches = [...matches.filter((m) => m.stage === 'group'), ...advanced]
-      }
-
-      const next: Tournament = { ...tournament, matches }
-      const finalRound = next.bracketRounds.length - 1
-      const finals = next.matches.filter(
-        (m) => m.stage === 'knockout' && m.round === finalRound,
-      )
-      if (finals.length === 1 && finals[0].status !== 'pending') {
-        next.phase = 'finished'
-      }
+      const next =
+        updatedMatch.stage === 'knockout'
+          ? applyLivesAfterMatch({ ...tournament, matches })
+          : { ...tournament, matches }
 
       await onSave(next)
     } catch (e) {
