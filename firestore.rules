@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Leitura pública para placar ao vivo.
+    // Escrita: organizada pelo app com senha (hash no documento).
+    // Para torneio entre amigos no plano Spark — ok.
+    // Em produção maior, troque por Callable Functions (plano Blaze).
+    match /tournaments/{tournamentId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+  }
+}
