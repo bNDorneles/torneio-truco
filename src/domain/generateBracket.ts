@@ -30,7 +30,7 @@ export function describeKnockoutPlan(tournament: Tournament): string {
     if (plan.prelimMatches === 0) {
       return `${n} dupla(s) · 2 vidas (chave alta + baixa), sem bye`
     }
-    return `${n} dupla(s) · ${plan.prelimMatches} prelim + 2 vidas (chave de ${plan.mainSize})`
+    return `${n} duplas · ${plan.prelimMatches} prelim (vaga) + ${plan.directSeeds} direta(s) na chave de ${plan.mainSize} (2 vidas)`
   }
   const advance = getAdvancePerGroup(tournament)
   try {

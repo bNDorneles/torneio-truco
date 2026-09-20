@@ -5,7 +5,7 @@ import { verifyPassword } from '../domain/crypto'
 import { isOrganizerSession, setOrganizerSession } from '../lib/session'
 import { formatLabelOf, phaseLabel } from '../lib/labels'
 import { createId } from '../domain/ids'
-import { drawPairs } from '../domain/drawPairs'
+import { drawPairs, createManualPair, updatePairNames, removePair } from '../domain/drawPairs'
 import { formGroups, movePairBetweenGroups } from '../domain/formGroups'
 import { generateRoundRobin } from '../domain/roundRobin'
 import { computeStandings } from '../domain/standings'
@@ -298,37 +298,54 @@ function PairsTab({
   const [drawing, setDrawing] = useState(false)
   const [countdown, setCountdown] = useState<number | null>(null)
   const [pendingLabel, setPendingLabel] = useState<string | null>(null)
+  const [newA, setNewA] = useState('')
+  const [newB, setNewB] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editA, setEditA] = useState('')
+  const [editB, setEditB] = useState('')
   const hasPairs = tournament.pairs.length > 0 && !drawing
+  const format = getTournamentFormat(tournament)
+
+  function confirmClearDownstream(message: string): boolean {
+    const hasDownstream =
+      tournament.groups.length > 0 ||
+      tournament.matches.some((m) => isKnockoutStage(m.stage)) ||
+      hasKnockoutScores(tournament) ||
+      hasGroupScores(tournament)
+    if (!hasDownstream) return true
+    return confirm(message)
+  }
+
+  function stripDownstream(base: Tournament): Tournament {
+    return {
+      ...base,
+      groups: [],
+      matches: [],
+      bracketRounds: [],
+      thirdPlaceMatchId: null,
+      phase: 'pairs',
+    }
+  }
 
   async function handleDraw() {
     try {
       setError(null)
       if (drawing) return
       if (hasPairs) {
-        const hasDownstream =
-          tournament.groups.length > 0 ||
-          tournament.matches.length > 0 ||
-          hasKnockoutScores(tournament)
         if (
-          !confirm(
-            hasDownstream
-              ? 'Sortear de novo zera grupos, placares e chave. Continuar?'
-              : 'Sortear as duplas novamente?',
+          !confirmClearDownstream(
+            'Sortear de novo zera grupos, placares e chave. Continuar?',
           )
         ) {
           return
         }
       }
+      if (tournament.players.length < 2 || tournament.players.length % 2 !== 0) {
+        throw new Error('Cadastre quantidade par de jogadores (aba Jogadores) ou use “Cadastrar dupla”.')
+      }
       const allPairs = drawPairs(tournament.players)
       setDrawing(true)
-      const base: Tournament = {
-        ...tournament,
-        groups: [],
-        matches: [],
-        bracketRounds: [],
-        thirdPlaceMatchId: null,
-        phase: 'pairs',
-      }
+      const base = stripDownstream(tournament)
       await onSave({ ...base, pairs: [] })
 
       const revealed: Pair[] = []
@@ -353,53 +370,217 @@ function PairsTab({
     }
   }
 
+  async function handleAddPair(e: FormEvent) {
+    e.preventDefault()
+    try {
+      setError(null)
+      if (
+        !confirmClearDownstream(
+          'Cadastrar uma dupla a mais zera a chave (e grupos, se houver) para remontar. Continuar?',
+        )
+      ) {
+        return
+      }
+      const { players, pair } = createManualPair(tournament.players, newA, newB)
+      const next = stripDownstream({
+        ...tournament,
+        players,
+        pairs: [...tournament.pairs, pair],
+      })
+      await onSave(next)
+      setNewA('')
+      setNewB('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao cadastrar')
+    }
+  }
+
+  function startEdit(pair: Pair) {
+    const p0 = tournament.players.find((p) => p.id === pair.playerIds[0])
+    const p1 = tournament.players.find((p) => p.id === pair.playerIds[1])
+    setEditingId(pair.id)
+    setEditA(p0?.name ?? '')
+    setEditB(p1?.name ?? '')
+  }
+
+  async function saveEdit(e: FormEvent) {
+    e.preventDefault()
+    if (!editingId) return
+    try {
+      setError(null)
+      const { players, pairs } = updatePairNames(
+        tournament.players,
+        tournament.pairs,
+        editingId,
+        editA,
+        editB,
+      )
+      await onSave({ ...tournament, players, pairs })
+      setEditingId(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao editar')
+    }
+  }
+
+  async function handleRemove(pairId: string) {
+    if (
+      !confirmClearDownstream(
+        'Remover a dupla zera a chave (e grupos). Continuar?',
+      )
+    ) {
+      return
+    }
+    if (!confirm('Remover esta dupla de vez?')) return
+    try {
+      const { players, pairs } = removePair(
+        tournament.players,
+        tournament.pairs,
+        pairId,
+      )
+      await onSave(stripDownstream({ ...tournament, players, pairs }))
+      if (editingId === pairId) setEditingId(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao remover')
+    }
+  }
+
   return (
-    <div className="panel fade-in">
-      <h2>Sorteio de duplas</h2>
-      <p className="muted">
-        Cadastre os jogadores e sorteie. Pode sortear de novo a qualquer momento.
-      </p>
-      <div className="row">
-        <button type="button" onClick={handleDraw} disabled={drawing}>
-          {drawing
-            ? 'Sorteando…'
-            : hasPairs
-              ? 'Sortear duplas novamente'
-              : 'Sortear duplas'}
-        </button>
-      </div>
-      {error && <div className="alert">{error}</div>}
-
-      {drawing && (
-        <div className="draw-stage">
-          {countdown !== null ? (
-            <>
-              <p className="draw-next">{pendingLabel}</p>
-              <div key={countdown} className="countdown-number">
-                {countdown}
-              </div>
-            </>
-          ) : (
-            <p className="draw-reveal">Dupla revelada!</p>
-          )}
+    <div className="stack fade-in">
+      <div className="panel">
+        <h2>Sorteio de duplas</h2>
+        <p className="muted">
+          Sorteie pelos jogadores cadastrados, ou cadastre/edite uma dupla manualmente
+          (útil se o torneio já começou).
+        </p>
+        {format === 'double_elim' && tournament.pairs.length > 0 && (
+          <p className="muted" style={{ marginTop: 0 }}>
+            Com <strong>{tournament.pairs.length} duplas</strong> no 2 vidas:{' '}
+            {describeKnockoutPlan(tournament)}.
+            {tournament.pairs.length === 7 && (
+              <>
+                {' '}
+                Na prática: <strong>3 preliminares</strong> (6 duplas jogam a vaga),{' '}
+                <strong>1 entra direto</strong> na chave de 4, depois chave alta + baixa
+                até a final.
+              </>
+            )}
+          </p>
+        )}
+        <div className="row">
+          <button type="button" onClick={handleDraw} disabled={drawing}>
+            {drawing
+              ? 'Sorteando…'
+              : hasPairs
+                ? 'Sortear duplas novamente'
+                : 'Sortear duplas'}
+          </button>
         </div>
-      )}
+        {error && <div className="alert">{error}</div>}
 
-      <ul className="list" style={{ marginTop: '1rem' }}>
-        {tournament.pairs.map((pair, idx) => (
-          <li
-            key={pair.id}
-            className={idx === tournament.pairs.length - 1 && drawing ? 'pair-just-in' : ''}
-          >
-            <span>
-              <strong>Dupla {idx + 1}:</strong> {pair.label}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {tournament.pairs.length === 0 && !drawing && (
-        <p className="empty">Cadastre os jogadores na aba Jogadores e depois sorteie aqui.</p>
-      )}
+        {drawing && (
+          <div className="draw-stage">
+            {countdown !== null ? (
+              <>
+                <p className="draw-next">{pendingLabel}</p>
+                <div key={countdown} className="countdown-number">
+                  {countdown}
+                </div>
+              </>
+            ) : (
+              <p className="draw-reveal">Dupla revelada!</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Cadastrar dupla a mais</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Informe os dois nomes. A chave precisa ser gerada de novo depois.
+        </p>
+        <form className="row" onSubmit={handleAddPair}>
+          <input
+            style={{ flex: 1 }}
+            value={newA}
+            onChange={(e) => setNewA(e.target.value)}
+            placeholder="Jogador 1"
+            disabled={drawing}
+          />
+          <input
+            style={{ flex: 1 }}
+            value={newB}
+            onChange={(e) => setNewB(e.target.value)}
+            placeholder="Jogador 2"
+            disabled={drawing}
+          />
+          <button type="submit" disabled={drawing}>
+            Adicionar dupla
+          </button>
+        </form>
+      </div>
+
+      <div className="panel">
+        <h3>Duplas ({tournament.pairs.length})</h3>
+        <ul className="list">
+          {tournament.pairs.map((pair, idx) => (
+            <li
+              key={pair.id}
+              className={idx === tournament.pairs.length - 1 && drawing ? 'pair-just-in' : ''}
+              style={{ flexWrap: 'wrap', gap: '0.5rem' }}
+            >
+              {editingId === pair.id ? (
+                <form className="row" style={{ flex: 1, width: '100%' }} onSubmit={saveEdit}>
+                  <input
+                    style={{ flex: 1 }}
+                    value={editA}
+                    onChange={(e) => setEditA(e.target.value)}
+                  />
+                  <input
+                    style={{ flex: 1 }}
+                    value={editB}
+                    onChange={(e) => setEditB(e.target.value)}
+                  />
+                  <button type="submit">Salvar</button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setEditingId(null)}
+                  >
+                    Cancelar
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <span style={{ flex: 1 }}>
+                    <strong>Dupla {idx + 1}:</strong> {pair.label}
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={drawing}
+                    onClick={() => startEdit(pair)}
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={drawing}
+                    onClick={() => void handleRemove(pair.id)}
+                  >
+                    Remover
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+        {tournament.pairs.length === 0 && !drawing && (
+          <p className="empty">
+            Cadastre jogadores e sorteie, ou adicione uma dupla manualmente acima.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
