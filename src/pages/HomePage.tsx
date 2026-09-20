@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import type { BestOf, TournamentListItem } from '../types/tournament'
+import type { BestOf, TournamentFormat, TournamentListItem } from '../types/tournament'
 import { createTournament } from '../lib/createTournament'
 import { listTournaments } from '../lib/storage'
 import { setOrganizerSession } from '../lib/session'
@@ -13,8 +13,9 @@ export function HomePage() {
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [bestOf, setBestOf] = useState<BestOf>(3)
-  const [pointsTarget, setPointsTarget] = useState(12)
   const [thirdPlace, setThirdPlace] = useState(true)
+  const [advancePerGroup, setAdvancePerGroup] = useState(2)
+  const [format, setFormat] = useState<TournamentFormat>('groups_knockout')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -35,8 +36,9 @@ export function HomePage() {
         name,
         password,
         bestOf,
-        pointsTarget,
-        thirdPlaceEnabled: thirdPlace,
+        thirdPlaceEnabled: format === 'groups_knockout' ? thirdPlace : false,
+        advancePerGroup: format === 'groups_knockout' ? advancePerGroup : 2,
+        format,
       })
       setOrganizerSession(t.id)
       navigate(`/t/${t.slug}/admin`)
@@ -55,8 +57,8 @@ export function HomePage() {
         </p>
         <h1 className="brand">Torneio de Truco</h1>
         <p className="subbrand">
-          Cadastre jogadores, sorteie duplas, monte grupos, lance placares e compartilhe o
-          link para quem estiver fora acompanhar ao vivo.
+          Cadastre jogadores, sorteie duplas, monte grupos ou double elimination, lance
+          placares e compartilhe o link.
         </p>
       </section>
 
@@ -77,36 +79,57 @@ export function HomePage() {
                 placeholder="Só quem organiza"
               />
             </label>
+            <label>
+              Formato do torneio
+              <select
+                value={format}
+                onChange={(e) => setFormat(e.target.value as TournamentFormat)}
+              >
+                <option value="groups_knockout">Grupos + mata-mata</option>
+                <option value="double_elim">Double elimination (2 vidas)</option>
+              </select>
+            </label>
+            <p className="muted" style={{ margin: 0, fontSize: '0.9rem' }}>
+              {format === 'groups_knockout'
+                ? 'Fase de grupos e depois mata-mata (cruzamento 1A×2B quando sobe 2). Sem bye.'
+                : '2 vidas como na chave Farroupilha: chave alta + chave baixa. Sem bye.'}
+            </p>
             <div className="row">
               <label style={{ flex: 1 }}>
-                Formato
+                Séries
                 <select
                   value={bestOf}
                   onChange={(e) => setBestOf(Number(e.target.value) as BestOf)}
                 >
-                  <option value={1}>Melhor de 1</option>
-                  <option value={3}>Melhor de 3</option>
-                  <option value={5}>Melhor de 5</option>
+                  <option value={1}>Melhor de 1 (1×0)</option>
+                  <option value={3}>Melhor de 3 (2×0 / 2×1)</option>
+                  <option value={5}>Melhor de 5 (3×0 / 3×1 / 3×2)</option>
                 </select>
               </label>
-              <label style={{ flex: 1 }}>
-                Meta de pontos (round)
-                <input
-                  type="number"
-                  min={1}
-                  value={pointsTarget}
-                  onChange={(e) => setPointsTarget(Number(e.target.value) || 12)}
-                />
-              </label>
             </div>
-            <label style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                checked={thirdPlace}
-                onChange={(e) => setThirdPlace(e.target.checked)}
-              />
-              Disputa de 3º lugar
-            </label>
+            {format === 'groups_knockout' && (
+              <>
+                <label>
+                  Classificados por grupo
+                  <select
+                    value={advancePerGroup}
+                    onChange={(e) => setAdvancePerGroup(Number(e.target.value))}
+                  >
+                    <option value={1}>1º lugar (1 por grupo)</option>
+                    <option value={2}>1º e 2º (2 por grupo)</option>
+                    <option value={3}>1º, 2º e 3º (3 por grupo)</option>
+                  </select>
+                </label>
+                <label style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={thirdPlace}
+                    onChange={(e) => setThirdPlace(e.target.checked)}
+                  />
+                  Disputa de 3º lugar
+                </label>
+              </>
+            )}
             {error && <div className="alert">{error}</div>}
             <button type="submit" disabled={busy}>
               {busy ? 'Criando…' : 'Criar torneio'}

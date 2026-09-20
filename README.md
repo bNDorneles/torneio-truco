@@ -50,12 +50,12 @@ VITE_FIREBASE_APP_ID=
 
 ## Fluxo do organizador
 
-1. Criar torneio (nome + senha)
+1. Criar torneio (nome + senha + **formato**: Grupos+mata-mata **ou** Double elimination)
 2. Cadastrar jogadores (quantidade par)
-3. Sortear duplas (uma vez)
-4. Sortear grupos (3–4 duplas) e gerar todos vs todos
-5. Lançar o placar de cada partida (select a partir de 0)
-6. Gerar mata-mata (1º×2º cruzado + modo manual)
+3. Sortear duplas (pode sortear de novo)
+4. Se grupos: sortear grupos, lançar placares, gerar chave (pode regenerar)
+5. Se double-elim: gerar chave alta/baixa após as duplas (pode regenerar)
+6. Lançar placares do mata-mata
 7. Compartilhar `/t/seu-slug` (público) ou `/t/seu-slug/tv` (projetor)
 
 ## Desempates

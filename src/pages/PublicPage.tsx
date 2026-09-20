@@ -1,18 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTournament } from '../hooks/useTournament'
-import { phaseLabel, getPairName } from '../lib/labels'
+import { formatLabelOf, phaseLabel, getPairName } from '../lib/labels'
 import { computeStandings } from '../domain/standings'
 import { StandingsTable } from '../components/StandingsTable'
-import { LivesBoard } from '../components/LivesBoard'
+import { KnockoutBracket } from '../components/BracketView'
 import { MatchEditor } from '../components/MatchEditor'
+import { getTournamentFormat, isKnockoutStage } from '../types/tournament'
 
 type Tab = 'pairs' | 'groups' | 'results' | 'knockout'
 
 export function PublicPage() {
   const { slug } = useParams()
   const { tournament, loading, error } = useTournament(slug)
-  const [tab, setTab] = useState<Tab>('results')
+  const [tab, setTab] = useState<Tab>('pairs')
+
+  useEffect(() => {
+    if (!tournament) return
+    const format = getTournamentFormat(tournament)
+    if (format === 'double_elim' && (tab === 'groups' || tab === 'results')) {
+      setTab('knockout')
+    }
+  }, [tournament, tab])
 
   if (loading) {
     return (
@@ -31,15 +40,29 @@ export function PublicPage() {
     )
   }
 
+  const format = getTournamentFormat(tournament)
+  const showGroups = format === 'groups_knockout'
+
+  const tabs: [Tab, string][] = [
+    ['pairs', 'Duplas'],
+    ...(showGroups
+      ? ([
+          ['groups', 'Grupos'],
+          ['results', 'Resultados'],
+        ] as [Tab, string][])
+      : []),
+    ['knockout', 'Mata-mata'],
+  ]
+
   return (
-    <div className="app-shell">
+    <div className="app-shell app-shell-wide">
       <div className="topbar">
         <div>
           <h1 className="brand" style={{ fontSize: '2.6rem' }}>
             {tournament.name}
           </h1>
           <p className="muted" style={{ margin: '0.25rem 0 0' }}>
-            Acompanhe ao vivo · {phaseLabel(tournament.phase)}
+            Acompanhe ao vivo · {phaseLabel(tournament.phase)} · {formatLabelOf(tournament)}
           </p>
         </div>
         <nav>
@@ -53,14 +76,7 @@ export function PublicPage() {
       </div>
 
       <div className="tabs">
-        {(
-          [
-            ['pairs', 'Duplas'],
-            ['groups', 'Grupos'],
-            ['results', 'Resultados'],
-            ['knockout', '2 vidas'],
-          ] as const
-        ).map(([id, label]) => (
+        {tabs.map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -88,7 +104,7 @@ export function PublicPage() {
         </div>
       )}
 
-      {tab === 'groups' && (
+      {tab === 'groups' && showGroups && (
         <div className="grid-2 fade-in">
           {tournament.groups.map((g) => (
             <div className="panel" key={g.id}>
@@ -110,7 +126,7 @@ export function PublicPage() {
         </div>
       )}
 
-      {tab === 'results' && (
+      {tab === 'results' && showGroups && (
         <div className="stack fade-in">
           {tournament.groups.map((group) => {
             const matches = tournament.matches.filter(
@@ -141,29 +157,12 @@ export function PublicPage() {
 
       {tab === 'knockout' && (
         <div className="stack fade-in">
-          <div className="panel">
-            <h2>2 vidas</h2>
-            <LivesBoard tournament={tournament} />
-          </div>
-          <div className="panel">
-            <h3>Confrontos</h3>
-            <div className="stack">
-              {tournament.matches
-                .filter((m) => m.stage === 'knockout')
-                .map((m) => (
-                  <MatchEditor
-                    key={m.id}
-                    tournament={tournament}
-                    match={m}
-                    canEdit={false}
-                    onSave={async () => undefined}
-                  />
-                ))}
-              {!tournament.matches.some((m) => m.stage === 'knockout') && (
-                <p className="empty">Aguardando a fase de 2 vidas.</p>
-              )}
+          <KnockoutBracket tournament={tournament} />
+          {!tournament.matches.some((m) => isKnockoutStage(m.stage)) && (
+            <div className="panel">
+              <p className="empty">Aguardando a chave do mata-mata.</p>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>

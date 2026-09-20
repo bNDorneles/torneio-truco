@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { GameScore, Match, Tournament } from '../types/tournament'
+import { useState } from 'react'
+import type { Match, Tournament } from '../types/tournament'
+import { isKnockoutStage } from '../types/tournament'
 import {
-  applyMatchFromGames,
+  applyMatchSets,
   applyWalkover,
   clearMatchResult,
+  formatSeries,
   setsToWin,
+  validSeriesScores,
 } from '../domain/matchScore'
-import { applyLivesAfterMatch } from '../domain/lives'
+import {
+  applyAfterKnockoutMatch,
+  clearKnockoutMatch,
+} from '../domain/bracketAdvance'
 import { getPairName } from '../lib/labels'
 
 interface Props {
@@ -14,49 +20,39 @@ interface Props {
   match: Match
   canEdit: boolean
   onSave: (next: Tournament) => Promise<void>
+  compact?: boolean
 }
 
-type ScoreRow = { a: number; b: number }
-
-function gamesToForm(games: GameScore[] | undefined, bestOf: number): ScoreRow[] {
-  return Array.from({ length: bestOf }, (_, i) => {
-    const g = games?.[i]
-    if (!g) return { a: 0, b: 0 }
-    return { a: g.pointsA, b: g.pointsB }
-  })
-}
-
-function scoreOptions(max: number): number[] {
-  return Array.from({ length: max + 1 }, (_, i) => i)
-}
-
-export function MatchEditor({ tournament, match, canEdit, onSave }: Props) {
+export function MatchEditor({
+  tournament,
+  match,
+  canEdit,
+  onSave,
+  compact = false,
+}: Props) {
   const bestOf = tournament.settings.bestOf
-  const pointsTarget = tournament.settings.pointsTarget
-  const [rows, setRows] = useState<ScoreRow[]>(() => gamesToForm(match.games, bestOf))
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    setRows(gamesToForm(match.games, bestOf))
-  }, [match.id, match.status, match.games, bestOf])
 
   const nameA = getPairName(tournament, match.pairAId)
   const nameB = getPairName(tournament, match.pairBId)
   const need = setsToWin(bestOf)
-  const options = useMemo(() => scoreOptions(pointsTarget), [pointsTarget])
+  const scores = validSeriesScores(bestOf)
 
-  async function persist(updatedMatch: Match) {
+  async function persist(updatedMatch: Match, clearing = false) {
     setBusy(true)
     setError(null)
     try {
       const matches = tournament.matches.map((m) =>
         m.id === updatedMatch.id ? updatedMatch : m,
       )
-      const next =
-        updatedMatch.stage === 'knockout'
-          ? applyLivesAfterMatch({ ...tournament, matches })
-          : { ...tournament, matches }
+      let next: Tournament = { ...tournament, matches }
+
+      if (isKnockoutStage(updatedMatch.stage)) {
+        next = clearing
+          ? clearKnockoutMatch({ ...tournament, matches }, updatedMatch.id)
+          : applyAfterKnockoutMatch({ ...tournament, matches }, updatedMatch.id)
+      }
 
       await onSave(next)
     } catch (e) {
@@ -66,26 +62,9 @@ export function MatchEditor({ tournament, match, canEdit, onSave }: Props) {
     }
   }
 
-  function updateRow(index: number, side: 'a' | 'b', value: number) {
-    setRows((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, [side]: value } : row)),
-    )
-  }
-
-  async function handleSave() {
+  async function handleScore(setsA: number, setsB: number) {
     try {
-      if (!match.pairAId || !match.pairBId) {
-        setError('Confrontos incompletos.')
-        return
-      }
-
-      const games: GameScore[] = []
-      for (const row of rows) {
-        if (row.a === 0 && row.b === 0) break
-        games.push({ pointsA: row.a, pointsB: row.b })
-      }
-
-      const updated = applyMatchFromGames(match, games, bestOf, pointsTarget)
+      const updated = applyMatchSets(match, setsA, setsB, bestOf)
       await persist(updated)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro')
@@ -97,8 +76,47 @@ export function MatchEditor({ tournament, match, canEdit, onSave }: Props) {
   }
 
   async function handleClear() {
-    await persist(clearMatchResult(match))
-    setRows(gamesToForm([], bestOf))
+    await persist(clearMatchResult(match), true)
+  }
+
+  const scoreButtons = (
+    <div className="score-picks">
+      {scores.map((s) => {
+        const label = formatSeries(s.setsA, s.setsB)
+        const active =
+          match.status !== 'pending' &&
+          match.setsA === s.setsA &&
+          match.setsB === s.setsB
+        return (
+          <button
+            key={label}
+            type="button"
+            className={active ? 'score-pick active' : 'score-pick'}
+            disabled={busy || !canEdit}
+            onClick={() => handleScore(s.setsA, s.setsB)}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+
+  if (compact) {
+    return (
+      <div className="lb-edit">
+        {canEdit && match.pairAId && match.pairBId ? scoreButtons : null}
+        {!canEdit && match.status !== 'pending' && (
+          <span>{formatSeries(match.setsA, match.setsB)}</span>
+        )}
+        {canEdit && match.status !== 'pending' && (
+          <button type="button" className="ghost" disabled={busy} onClick={handleClear}>
+            limpar
+          </button>
+        )}
+        {error && <div className="lb-error">{error}</div>}
+      </div>
+    )
   }
 
   return (
@@ -108,62 +126,21 @@ export function MatchEditor({ tournament, match, canEdit, onSave }: Props) {
           {nameA} <span className="muted">vs</span> {nameB}
         </strong>
         <span className={`badge ${match.status === 'pending' ? '' : 'ok'}`}>
-          {match.isBye
-            ? 'BYE'
-            : match.status === 'wo'
-              ? 'W.O.'
-              : match.status === 'done'
-                ? `${match.setsA}×${match.setsB}`
-                : 'Pendente'}
+          {match.status === 'wo'
+            ? 'W.O.'
+            : match.status === 'done'
+              ? formatSeries(match.setsA, match.setsB)
+              : 'Pendente'}
         </span>
       </div>
 
-      {canEdit && !match.isBye && match.pairAId && match.pairBId && (
+      {canEdit && match.pairAId && match.pairBId && (
         <>
           <p className="muted" style={{ margin: 0, fontSize: '0.9rem' }}>
-            Melhor de {bestOf} (primeiro a {need}). Começa em 0 — selecione o placar
-            final de cada partida (até {pointsTarget}).
+            Melhor de {bestOf} (primeiro a {need}). Escolha o placar da série:
           </p>
-          <div className="stack">
-            {rows.map((row, index) => (
-              <div key={index} className="partida-row">
-                <div className="partida-label">Partida {index + 1}</div>
-                <div className="score-inputs">
-                  <label>
-                    {nameA}
-                    <select
-                      value={row.a}
-                      onChange={(e) => updateRow(index, 'a', Number(e.target.value))}
-                    >
-                      {options.map((n) => (
-                        <option key={`a-${n}`} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <span style={{ textAlign: 'center', paddingBottom: '0.5rem' }}>×</span>
-                  <label>
-                    {nameB}
-                    <select
-                      value={row.b}
-                      onChange={(e) => updateRow(index, 'b', Number(e.target.value))}
-                    >
-                      {options.map((n) => (
-                        <option key={`b-${n}`} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-            ))}
-          </div>
+          {scoreButtons}
           <div className="row">
-            <button type="button" disabled={busy} onClick={handleSave}>
-              Salvar placar
-            </button>
             <button
               type="button"
               className="secondary"
@@ -190,34 +167,14 @@ export function MatchEditor({ tournament, match, canEdit, onSave }: Props) {
       )}
 
       {!canEdit && (
-        <div className="stack" style={{ gap: '0.35rem' }}>
-          {(match.games ?? []).map((g, i) => (
-            <p key={i} style={{ margin: 0 }}>
-              Partida {i + 1}: {nameA}{' '}
-              <strong>
-                {g.pointsA}×{g.pointsB}
-              </strong>{' '}
-              {nameB}
-            </p>
-          ))}
-          {match.status !== 'pending' && (
-            <p className="muted" style={{ margin: 0 }}>
-              Série {match.setsA}×{match.setsB}
-              {match.winnerPairId &&
-                ` · Venceu: ${getPairName(tournament, match.winnerPairId)}`}
-            </p>
-          )}
-          {match.status === 'pending' && !(match.games?.length) && (
-            <p className="muted" style={{ margin: 0 }}>
-              Aguardando placar
-            </p>
-          )}
-        </div>
-      )}
-
-      {canEdit && match.status === 'done' && (match.games?.length ?? 0) > 0 && (
-        <p className="muted" style={{ margin: 0, fontSize: '0.9rem' }}>
-          Série {match.setsA}×{match.setsB} · total pontos {match.pointsA}×{match.pointsB}
+        <p className="muted" style={{ margin: 0 }}>
+          {match.status === 'pending'
+            ? 'Aguardando placar'
+            : `${formatSeries(match.setsA, match.setsB)}${
+                match.winnerPairId
+                  ? ` · Venceu: ${getPairName(tournament, match.winnerPairId)}`
+                  : ''
+              }`}
         </p>
       )}
 
